@@ -9,7 +9,10 @@
 
 from Utils import *
 import json,os,sys
+import yaml
 
+with open('./configs/config.yml', 'r') as file:
+  config = yaml.safe_load(file)
 
 BOP_LIST = ['lmo','tless','ycbv','hb','tudl','icbin','itodd']
 BOP_DIR = os.getenv('BOP_DIR')
@@ -59,12 +62,19 @@ class YcbineoatReader:
     self.video_dir = video_dir
     self.downscale = downscale
     self.zfar = zfar
+    print('video_dir: '+str(video_dir)+"\n\n")
     self.color_files = sorted(glob.glob(f"{self.video_dir}/rgb/*.png"))
-    self.K = np.loadtxt(f'{video_dir}/cam_K.txt').reshape(3,3)
+    self.K = np.loadtxt((str(config['workspace']['workspace_global_path'])+str(config['camera']['cam_k_file'])).replace('./', '')).reshape(3,3)
     self.id_strs = []
     for color_file in self.color_files:
       id_str = os.path.basename(color_file).replace('.png','')
       self.id_strs.append(id_str)
+
+    if self.color_files: print("Image dimensions:", cv2.imread(self.color_files[0]).shape)
+    else:
+      print("No images found in self.color_files")
+      print('self.color_files: '+str(self.color_files))
+
     self.H,self.W = cv2.imread(self.color_files[0]).shape[:2]
 
     if shorter_side is not None:
@@ -147,8 +157,9 @@ class YcbineoatReader:
 
   def get_gt_mesh(self):
     ob_name = self.videoname_to_object[self.get_video_name()]
-    YCB_VIDEO_DIR = os.getenv('YCB_VIDEO_DIR')
-    mesh = trimesh.load(f'{YCB_VIDEO_DIR}/models/{ob_name}/textured_simple.obj')
+    # YCB_VIDEO_DIR = os.getenv('YCB_VIDEO_DIR')
+    # mesh = trimesh.load(f'{YCB_VIDEO_DIR}/models/{ob_name}/textured_simple.obj')
+    mesh = trimesh.load(str(config['workspace']['workspace_global_path'])+str(config['object_detection']['mesh_file']))
     return mesh
 
 

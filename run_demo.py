@@ -10,46 +10,80 @@
 from estimater import *
 from datareader import *
 import argparse
+import yaml
 
+with open('./configs/config.yml', 'r') as file:
+  config = yaml.safe_load(file)
+
+WHITE_MASK=str(config['object_detection']['white_mask'])=='True'
 
 if __name__=='__main__':
-  parser = argparse.ArgumentParser()
-  code_dir = os.path.dirname(os.path.realpath(__file__))
-  parser.add_argument('--mesh_file', type=str, default=f'{code_dir}/demo_data/mustard0/mesh/textured_simple.obj')
-  parser.add_argument('--test_scene_dir', type=str, default=f'{code_dir}/demo_data/mustard0')
+  parser = argparse.ArgumentParser() # set arguments 
+  # code_dir = os.path.dirname(os.path.realpath(__file__))
+  # code_dir = '/home/jacknaimer/SchoelligLabProjects/FoundationPose'
+  code_dir = config['workspace']['workspace_global_path']
+  parser.add_argument('--mesh_file', type=str, default=code_dir+config['object_detection']['mesh_file'])
+  parser.add_argument('--test_scene_dir', type=str, default=code_dir+config['camera']['rgbd_frames_files'])
   parser.add_argument('--est_refine_iter', type=int, default=5)
   parser.add_argument('--track_refine_iter', type=int, default=2)
   parser.add_argument('--debug', type=int, default=1)
-  parser.add_argument('--debug_dir', type=str, default=f'{code_dir}/debug')
+  parser.add_argument('--debug_dir', type=str, default=f'{code_dir}./debug')
   args = parser.parse_args()
 
   set_logging_format()
   set_seed(0)
 
-  mesh = trimesh.load(args.mesh_file)
+  mesh = trimesh.load(args.mesh_file) # gets the mesh for the object (from args)
 
+  # sets debug dirs and args
   debug = args.debug
   debug_dir = args.debug_dir
-  os.system(f'rm -rf {debug_dir}/* && mkdir -p {debug_dir}/track_vis {debug_dir}/ob_in_cam')
+  os.system(f'rm -rf {debug_dir}/* && mkdir -p {debug_dir}/track_vis {debug_dir}/ob_in_cam') 
 
+  # orients axes to the mesh of the objects based on the best fitting minimum volume convex hull around the mesh
   to_origin, extents = trimesh.bounds.oriented_bounds(mesh)
   bbox = np.stack([-extents/2, extents/2], axis=0).reshape(2,3)
 
-  scorer = ScorePredictor()
-  refiner = PoseRefinePredictor()
-  glctx = dr.RasterizeCudaContext()
+  # Does something
+  scorer = ScorePredictor() # init scorer for score prediction
+  refiner = PoseRefinePredictor() # init this for refined pose predictions/scoring or something
+  glctx = dr.RasterizeCudaContext() # stuff for cuda optimization
   est = FoundationPose(model_pts=mesh.vertices, model_normals=mesh.vertex_normals, mesh=mesh, scorer=scorer, refiner=refiner, debug_dir=debug_dir, debug=debug, glctx=glctx)
   logging.info("estimator initialization done")
 
-  reader = YcbineoatReader(video_dir=args.test_scene_dir, shorter_side=None, zfar=np.inf)
+  shorter_side = config['object_detection']['shorter_side']
+  if shorter_side == 'None': shorter_side = None
+  else: shorter_side = int(shorter_side)
+  reader = YcbineoatReader(video_dir=args.test_scene_dir, shorter_side=shorter_side, zfar=np.inf) # was shorter_side = None 
 
   for i in range(len(reader.color_files)):
     logging.info(f'i:{i}')
-    color = reader.get_color(i)
-    depth = reader.get_depth(i)
-    if i==0:
-      mask = reader.get_mask(0).astype(bool)
-      pose = est.register(K=reader.K, rgb=color, depth=depth, ob_mask=mask, iteration=args.est_refine_iter)
+    color = reader.get_color(i) # get the ith color frame
+    depth = reader.get_depth(i) # get the ith depth frame
+    if i==0: # if the first frame then do detection pose estimation instead of tracking pose estimation
+      if WHITE_MASK:
+        # mask = np.ones((720, 1280), dtype=bool)
+        height, width = 720, 1280
+        if str(config['camera']['crop_size'])!=None:
+          crop_size = int(config['camera']['crop_size'])
+          height, width = crop_size, crop_size
+        mask = np.zeros((height, width), dtype=bool)
+        center_x, center_y = 462, 441 # Red
+        center_x, center_y = 43, 435 # Orange
+        center_x, center_y = 114, 110 # Yellow
+        center_x, center_y = 399, 108 # Green
+        radius = 100
+        for y in range(height):
+          for x in range(width):
+            if (x - center_x) ** 2 + (y - center_y) ** 2 <= radius ** 2:
+              mask[y, x] = True
+
+
+
+      else:
+        mask = reader.get_mask(0).astype(bool) # mask = get_mask, maybe of area around object
+      print('RESTISTERED12345\n\n')
+      pose = est.register(K=reader.K, rgb=color, depth=depth, ob_mask=mask, iteration=args.est_refine_iter) # Get the 6d rotation/translation of the object from the color and depth frames and the mask
 
       if debug>=3:
         m = mesh.copy()
@@ -59,8 +93,8 @@ if __name__=='__main__':
         valid = depth>=0.1
         pcd = toOpen3dCloud(xyz_map[valid], color[valid])
         o3d.io.write_point_cloud(f'{debug_dir}/scene_complete.ply', pcd)
-    else:
-      pose = est.track_one(rgb=color, depth=depth, K=reader.K, iteration=args.track_refine_iter)
+    else: # if not the first frame
+      pose = est.track_one(rgb=color, depth=depth, K=reader.K, iteration=args.track_refine_iter) # do tracking pose estimation instead of simple pose estimation
 
     os.makedirs(f'{debug_dir}/ob_in_cam', exist_ok=True)
     np.savetxt(f'{debug_dir}/ob_in_cam/{reader.id_strs[i]}.txt', pose.reshape(4,4))
@@ -76,4 +110,3 @@ if __name__=='__main__':
     if debug>=2:
       os.makedirs(f'{debug_dir}/track_vis', exist_ok=True)
       imageio.imwrite(f'{debug_dir}/track_vis/{reader.id_strs[i]}.png', vis)
-

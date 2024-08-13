@@ -183,7 +183,7 @@ class FoundationPose:
     normal_map = None
     valid = (depth>=0.1) & (ob_mask>0)
     if valid.sum()<4:
-      logging.info(f'valid too small, return')
+      logging.info(f'\n\nvalid too small, return\n\n')
       pose = np.eye(4)
       pose[:3,3] = self.guess_translation(depth=depth, mask=ob_mask, K=K)
       return pose
@@ -232,6 +232,7 @@ class FoundationPose:
 
     best_pose = poses[0]@self.get_tf_to_centered_mesh()
     self.pose_last = poses[0]
+    print('SELF.POSE_LAST is REGISTERED')
     self.best_id = ids[0]
 
     self.poses = poses
